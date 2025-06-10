@@ -1,0 +1,49 @@
+import pandas as pd
+import numpy as np
+import csv
+import pywt
+from sklearn.preprocessing import MinMaxScaler
+from imblearn.over_sampling import SMOTE
+
+# Load the dataset
+data = pd.read_csv("MIT_BIH database.csv")
+
+# Function to apply Discrete Wavelet Transform
+def apply_dwt(data, wavelet='db2'):
+    coeffs = pywt.dwt(data, wavelet)
+    return np.hstack(coeffs)
+
+# Apply min-max normalization
+scaler = MinMaxScaler()
+data_normalized = scaler.fit_transform(data)
+
+# Apply DWT to the whole dataset
+data_dwt = np.apply_along_axis(apply_dwt, 1, data_normalized)
+
+# Split the data into features and target
+X = data_dwt[:, :-1]
+Y = data_dwt[:, -1]
+
+# Categorize the continuous target into discrete classes (Normal : 0, Abnormal : 1)
+threshold = np.median(Y)  # Adjust based on dataset characteristics
+Y_discrete = (Y > threshold).astype(int)
+
+# Apply SMOTE to balance the dataset
+smote = SMOTE(random_state=1)
+X_smote, Y_smote = smote.fit_resample(X, Y_discrete) # type: ignore
+
+# Combine the DWT features and the target column
+result = np.hstack((X_smote, Y_smote.reshape(-1, 1))) # type: ignore
+
+# Create the output CSV file
+filename = "MIT_BIH dataset.csv"
+with open(filename, "w", newline='') as outfile:
+    out_csv = csv.writer(outfile)
+    
+    # Write CSV header with feature names and target
+    header = [f'feature_{i}' for i in range(X_smote.shape[1])] + ['target']
+    out_csv.writerow(header)
+    
+    # Write the transformed data
+    for row in result:
+        out_csv.writerow(row)
