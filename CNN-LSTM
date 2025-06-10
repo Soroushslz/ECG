@@ -1,0 +1,83 @@
+import tensorflow as tf
+import numpy as np
+import pandas as pd
+import pywt
+from sklearn.model_selection import train_test_split, KFold
+from sklearn.preprocessing import StandardScaler
+
+# Load the dataset
+data = pd.read_csv("MIT_BIH dataset.csv")
+
+# Split the data into features and target
+X = data.drop(columns=["target"]).values
+Y = data["target"].values
+
+# Function to apply Discrete Wavelet Transform
+def apply_dwt(data, wavelet='db2'):
+    coeffs = pywt.dwt(data, wavelet)
+    return np.hstack(coeffs)
+
+# Apply DWT to each row in the dataset
+X_dwt = np.apply_along_axis(apply_dwt, 1, X)
+
+# Scale the data
+scaler = StandardScaler()
+X = scaler.fit_transform(X_dwt)
+
+# Split the data into training and testing sets
+X_train, X_test, Y_train, Y_test = train_test_split(X_dwt, Y, test_size=0.2, random_state=1)
+
+# Reshape the data for the CNN+LSTM model
+X_train_reshaped = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+X_test_reshaped = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+
+# Define parameters
+ni = X_train_reshaped.shape[1] # number of features
+nf = 8 # number of filters
+nk = 1 # size of kernel
+ns = 5 # number of samples
+nh = 3 # number of hidden units
+no = 1 # number of output units
+
+# Define the CNN+LSTM model
+model_cnn_lstm = tf.keras.Sequential([
+    tf.keras.layers.Conv1D(filters = nf, kernel_size = nk, activation = 'relu', input_shape = (ni, 1)),
+    tf.keras.layers.MaxPooling1D(pool_size = 2),
+    tf.keras.layers.Flatten(),
+    tf.keras.layer.Dropout(0.5),
+    tf.keras.layers.Dense(nh, activation='relu'),
+    tf.keras.layers.Dense(no, activation='sigmoid')
+])
+model_cnn_lstm.compile(loss='binary_crossentropy', optimizer=tf.keras.optimizers.Adam(learning_rate=0.01), metrics=['accuracy'])
+
+# Define the K-fold cross-validator
+kfold = KFold(n_splits=5, shuffle=True, random_state=1)
+
+# Train and evaluate the CNN+LSTM model using cross-validation
+accuracy_scores = []
+for train_idx, test_idx in kfold.split(X):
+    X_train, X_test = X[train_idx], X[test_idx]
+    Y_train, Y_test = Y[train_idx], Y[test_idx]
+
+    # Reshape the data for the CNN+LSTM model
+    X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+    X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+    
+    # Train the CNN+LSTM model
+    history_cnn_lstm = model_cnn_lstm.fit(X_train, Y_train, epochs=50, batch_size=64, 
+                                              validation_data=(X_test, Y_test), verbose=0)
+
+    # Evaluate the CNN+LSTM model on the test data
+    test_loss_cnn_lstm, test_acc_cnn_lstm = model_cnn_lstm.evaluate(X_test, Y_test)
+    accuracy_scores.append(test_acc_cnn_lstm)
+
+# Calculate mean and standard deviation of the accuracy scores
+mean_accuracy = np.mean(accuracy_scores)
+std_accuracy = np.std(accuracy_scores)
+
+# calculate the complexity of CNN+LSTM model
+CCNN_LSTM = ni * nf * nk * (ns - nk + 1) + (ns - nk + 1) * nh * (4*nf * 4*nh + 3 + no)
+print('Complexity of the CNN+LSTM:', CCNN_LSTM)
+
+# Accuracy of CNN+LSTM model with cross-validation
+print("Accuracy of CNN+LSTM model with cross-validation: {:.2f}%".format(mean_accuracy * 100, std_accuracy * 100))
